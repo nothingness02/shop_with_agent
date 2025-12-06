@@ -253,5 +253,3 @@ func (h *ShopHandler) BatchDeleteProducts(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "products deleted"})
 }
-
-// (no helper needed)

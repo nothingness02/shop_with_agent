@@ -1,6 +1,8 @@
 package shop
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+)
 
 type Shop struct {
 	gorm.Model
@@ -18,7 +20,8 @@ type Product struct {
 	Description string  `gorm:"size:255"`           // 商品描述
 	Price       float64 `gorm:"type:decimal(10,2)"` // 商品价格
 	Stock       int     // 库存数量
-	ProductImg  string  `gorm:"size:500"` // 商品图片URL
+	ProductImg  string  `gorm:"size:500"`                         // 商品图片URL
+	Tsv         string  `gorm:"type:tsvector;index:,type:gin;->"` // 用于全文搜索, GORM不会写入，由数据库触发器填充
 }
 
 type Category struct {

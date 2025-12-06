@@ -9,6 +9,9 @@ import (
 	"github.com/myproject/shop/internal/Order"
 	shop "github.com/myproject/shop/internal/Shop"
 	user "github.com/myproject/shop/internal/User"
+	search "github.com/myproject/shop/internal/search"
+	ordersearch "github.com/myproject/shop/internal/search/order"
+	"github.com/myproject/shop/internal/search/product"
 	"github.com/myproject/shop/pkg/database"
 	"github.com/myproject/shop/pkg/middleware"
 )
@@ -55,6 +58,9 @@ func (app *Application) mountRoutes() {
 		return
 	}
 
+	productSearchService := product.NewService(db.DB)
+	orderSearchService := ordersearch.NewService(db.DB)
+	searchHandler := search.NewHandler(productSearchService, orderSearchService)
 	orderrep := Order.NewRepository(db)
 	orderService := Order.NewOrderService(orderrep)
 	orderHandler := Order.NewOrderHandler(orderService)
@@ -105,6 +111,10 @@ func (app *Application) mountRoutes() {
 	v2 := app.Group("/api/v2")
 	v2.Use(middleware.JWTAuthMiddleware())
 	{
+		// Search routes
+		v2.GET("/search/products", searchHandler.SearchProducts)
+		v2.GET("/search/orders", searchHandler.SearchOrders)
+
 		// List & create shops
 		v2.GET("/shops", shopHandler.ListShops)
 		v2.POST("/shops", shopHandler.CreateShop)
@@ -131,7 +141,6 @@ func (app *Application) mountRoutes() {
 	v3 := app.Group("api/v3")
 	{
 		v3.GET("/shops/:id/comments", commentHandler.ListCommentsByShop)
-
 		v3.POST("/shops/:id/comments", middleware.JWTAuthMiddleware(), commentHandler.CreateComment)
 		v3.DELETE("/shops/:id/comments", commentHandler.DeleteComments)
 	}

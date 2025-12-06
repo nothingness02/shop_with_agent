@@ -35,6 +35,7 @@ type Order struct {
 	ShippingPhone   string `gorm:"size:20"`  // 收货人电话
 	ShippingAddress string `gorm:"size:255"` // 收货地址
 	ShippingZipCode string `gorm:"size:10"`  // 邮政编码
+	Tsv             string `gorm:"type:tsvector;index:,type:gin;->"`
 	//// 关联关系
 	OrderItems []OrderItem `gorm:"foreignKey:OrderID"`
 	//PaymentRecords   []PaymentRecord `gorm:"foreignKey:OrderID"`
