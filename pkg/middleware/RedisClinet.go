@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -46,4 +47,32 @@ func (r *RedisStore) DeleteJwtRefreshToken(ctx context.Context, jti string, user
 func (r *RedisStore) BlacklistAccessToken(ctx context.Context, jti string, expiration time.Duration) error {
 	key := "bl:access:" + jti
 	return r.Client.Set(ctx, key, "blacklisted", expiration).Err()
+}
+
+func (r *RedisStore) SetObjectWithTTL(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return r.Client.Set(ctx, key, data, expiration).Err()
+}
+
+func (r *RedisStore) GetObject(ctx context.Context, key string, dest interface{}) (bool, error) {
+	data, err := r.Client.Get(ctx, key).Bytes()
+	switch {
+	case err == redis.Nil:
+		// Cache miss
+		return false, nil
+	case err != nil:
+		return false, err
+	default:
+		if err := json.Unmarshal(data, dest); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+}
+
+func (r *RedisStore) DelteKey(ctx context.Context, key string) error {
+	return r.Client.Del(ctx, key).Err()
 }

@@ -51,10 +51,14 @@ func (s *Service) Search(query, lang string) ([]Result, error) {
 	var rows []orderRecord
 
 	tsquery := gorm.Expr("plainto_tsquery(?, ?)", lang, query)
+	tsvector := gorm.Expr(
+		"COALESCE(tsv, to_tsvector(?, COALESCE(order_id,'') || ' ' || COALESCE(status,'') || ' ' || COALESCE(shipping_name,'') || ' ' || COALESCE(shipping_phone,'') || ' ' || COALESCE(shipping_address,'') || ' ' || COALESCE(shipping_zip_code,'')))",
+		lang,
+	)
 
 	if err := s.db.Model(&orderRecord{}).
-		Where("tsv @@ ?", tsquery).
-		Order(gorm.Expr("ts_rank(tsv, ?) DESC", tsquery)).
+		Where("? @@ ?", tsvector, tsquery).
+		Order(gorm.Expr("ts_rank(?, ?) DESC", tsvector, tsquery)).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("search orders: %w", err)
 	}

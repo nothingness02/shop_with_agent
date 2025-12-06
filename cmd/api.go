@@ -2,7 +2,9 @@ package main
 
 import (
 	"log"
+	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	auth "github.com/myproject/shop/internal/Auth"
 	comment "github.com/myproject/shop/internal/Comment"
@@ -39,6 +41,14 @@ func NewApplication(config *config) *Application {
 		Engine: gin.Default(),
 		config: config,
 	}
+	app.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 	app.mountRoutes()
 	return app
 }
@@ -53,10 +63,15 @@ func (app *Application) mountRoutes() {
 	}
 
 	if err := db.AutoMigrate(&Order.Order{}, &Order.OrderItem{},
-		&shop.Shop{}, &shop.Product{}, &shop.Category{}, &user.User{}); err != nil {
+		&shop.Shop{}, &shop.Product{},
+		&shop.Category{}, &user.User{}, &comment.Comment{},
+	); err != nil {
 		log.Fatal(err)
 		return
 	}
+
+	redisStore := middleware.NewRedisStore("localhost:6379", "redis", 0)
+	middleware.InitRedis(redisStore.Client)
 
 	productSearchService := product.NewService(db.DB)
 	orderSearchService := ordersearch.NewService(db.DB)
@@ -65,15 +80,13 @@ func (app *Application) mountRoutes() {
 	orderService := Order.NewOrderService(orderrep)
 	orderHandler := Order.NewOrderHandler(orderService)
 	shoprep := shop.NewRepository(db)
-	shopService := shop.NewShopService(shoprep)
+	shopService := shop.NewShopService(shoprep, redisStore)
 	shopHandler := shop.NewShopHandler(shopService)
 
 	// 初始化用户仓库和 Redis（用于 refresh token 存储 / blacklist）
 	userRepo := user.NewRepository(db)
 	userService := user.NewService(userRepo)
 	userHandler := user.NewUserHandle(userService)
-	redisStore := middleware.NewRedisStore("localhost:6379", "", 0)
-	middleware.InitRedis(redisStore.Client)
 
 	// 初始化 Auth 服务与处理器
 	authService := auth.NewAuthService(userRepo, redisStore)
@@ -91,7 +104,7 @@ func (app *Application) mountRoutes() {
 		v0.GET("/users/:id", userHandler.GetUserByID)
 		v0.PATCH("/users/:id", userHandler.UpdateUser)
 		v0.DELETE("/users/:id", userHandler.DeleteUser)
-		v0.GET("/users/:username", userHandler.GetUserByName)
+		// v0.GET("/users/:username", userHandler.GetUserByName)
 		// Auth routes
 		v0.POST("/auth/login", authHandler.Login)
 		v0.POST("/auth/refresh", authHandler.Refresh)

@@ -16,14 +16,16 @@ func NewService(db *gorm.DB) *Service {
 }
 
 // Result is a lightweight view returned to callers.
+// Result keeps the same field names/json keys as the Product model
+// so that front-end rendering (which consumes list products API) works.
 type Result struct {
-	ID          uint    `json:"id"`
-	ShopID      uint    `json:"shop_id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price"`
-	Stock       int     `json:"stock"`
-	ProductImg  string  `json:"product_img"`
+	ID          uint    `json:"ID"`
+	ShopID      uint    `json:"ShopID"`
+	Name        string  `json:"Name"`
+	Description string  `json:"Description"`
+	Price       float64 `json:"Price"`
+	Stock       int     `json:"Stock"`
+	ProductImg  string  `json:"ProductImg"`
 }
 
 // productRecord mirrors the database schema for search queries.
@@ -47,10 +49,12 @@ func (s *Service) Search(query, lang string) ([]Result, error) {
 	var rows []productRecord
 
 	tsquery := gorm.Expr("plainto_tsquery(?, ?)", lang, query)
+	// 使用 coalesce(tsv, to_tsvector(...))，避免 tsv 未被触发器填充时无法命中
+	tsvector := gorm.Expr("COALESCE(tsv, to_tsvector(?, COALESCE(name,'') || ' ' || COALESCE(description,'')))", lang)
 
 	if err := s.db.Model(&productRecord{}).
-		Where("tsv @@ ?", tsquery).
-		Order(gorm.Expr("ts_rank(tsv, ?) DESC", tsquery)).
+		Where("? @@ ?", tsvector, tsquery).
+		Order(gorm.Expr("ts_rank(?, ?) DESC", tsvector, tsquery)).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("search products: %w", err)
 	}

@@ -15,33 +15,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-      
-  opensearch-node:
-    image: opensearchproject/opensearch:2.11.0
-    container_name: opensearch-node
-    environment:
-      - discovery.type=single-node
-      - bootstrap.memory_lock=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - DISABLE_SECURITY_PLUGIN=true # 学习环境禁用复杂的 SSL/Auth，生产环境需开启
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
+  redis:
+    image: redis:7.4-alpine
+    container_name: golang_redis
+    restart: always
     ports:
-      - "9200:9200"
-      - "9600:9600"
+      - "6379:6379"
+    environment:
+      - REDIS_PASSWORD=redis
+    command: redis-server --requirepass $$REDIS_PASSWORD
     volumes:
-      - opensearch-data:/usr/share/opensearch/data
-
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:2.11.0
-    container_name: opensearch-dashboards
-    ports:
-      - "5601:5601"
-    environment:
-      OPENSEARCH_HOSTS: '["http://opensearch-node:9200"]'
-      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
-
+      - ./redis-data:/data   
 volumes:
-  opensearch-data:
+  redis-data:
