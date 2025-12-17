@@ -12,12 +12,8 @@ type Database struct {
 	DB *gorm.DB
 }
 
-type Dbconfig struct {
-	Dsn string
-}
-
-func NewDB(config *Dbconfig) (*Database, error) {
-	database, err := gorm.Open(postgres.Open(config.Dsn), &gorm.Config{})
+func NewDB(dsn string) (*Database, error) {
+	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}

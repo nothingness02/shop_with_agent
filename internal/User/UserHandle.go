@@ -16,7 +16,7 @@ type RegisterUserRequest struct {
 	Username string `json:"username" binding:"required"`
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
-	Role     uint   `json:"role" binding:"required,oneof=1 10"`
+	Role     uint   `json:"role" binding:"required,oneof=1 5 10"`
 }
 
 type UpdateUserRequest struct {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	user "github.com/myproject/shop/internal/User"
 	"github.com/myproject/shop/pkg/utils"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -19,9 +20,13 @@ const (
 )
 
 var (
-	JWTSecret   = []byte("replace-with-env-secret")
+	JWTSecret   []byte
 	RedisClient *redis.Client // 在应用启动时初始化
 )
+
+func InitJWT(secret string) {
+	JWTSecret = []byte(secret)
+}
 
 func InitRedis(client *redis.Client) {
 	RedisClient = client
@@ -70,6 +75,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 				return
 			}
 		}
+
 		jti, _ := claims["jti"].(string)
 		sub, _ := claims["sub"].(string)
 		roleFloat, _ := claims["role"].(float64)
@@ -86,5 +92,21 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		c.Set(CtxUserRoleKey, uint(roleFloat))
 		c.Set(CtxTokenJTIKey, jti)
 		c.Next()
+	}
+}
+
+func MerchantAuthMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		roleVal, exists := ctx.Get(CtxUserRoleKey)
+		if !exists {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Permission denied: Role not found"})
+			return
+		}
+		role, ok := roleVal.(uint)
+		if !ok || (role != user.RoleMerchant && role != user.RoleAdmin) {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Permission denied: Only merchants and admins can perform this action"})
+			return
+		}
+		ctx.Next()
 	}
 }

@@ -4,6 +4,7 @@ import "gorm.io/gorm"
 
 const (
 	RoleCustomer uint = 1
+	RoleMerchant uint = 5
 	RoleAdmin    uint = 10
 )
 

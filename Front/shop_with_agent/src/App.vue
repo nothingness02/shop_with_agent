@@ -8,6 +8,7 @@ const VIEWS = {
   CART: 'cart',
   LOGIN: 'login',
   ORDERS: 'orders',
+  MERCHANT: 'merchant',
 } as const;
 type View = typeof VIEWS[keyof typeof VIEWS];
 
@@ -29,11 +30,29 @@ const products = ref<any[]>([]);
 const activeProduct = ref<any | null>(null);
 const cart = ref<{ product: any; quantity: number }[]>([]);
 const orders = ref<any[]>([]);
+const merchant = reactive({
+  shops: [] as any[],
+  products: [] as any[],
+  selectedShop: null as any,
+  loading: false,
+  creating: false,
+  shopForm: { name: '', description: '' },
+  productForm: { name: '', description: '', price: '', stock: 0, product_img: '' },
+});
 
 const isAuthed = computed(() => !!session.token);
+const isMerchant = computed(() => session.user?.role === 5 || session.user?.role === 10);
 const cartTotalCount = computed(() => cart.value.reduce((acc, item) => acc + item.quantity, 0));
 const cartTotalPrice = computed(() =>
   cart.value.reduce((acc, item) => acc + Number(item.product.Price || 0) * item.quantity, 0),
+);
+const merchantStock = computed(() =>
+  merchant.products.reduce((acc, item) => acc + Number(item.Stock || 0), 0),
+);
+const merchantCatalogValue = computed(() =>
+  merchant.products
+    .reduce((acc, item) => acc + Number(item.Price || 0) * Number(item.Stock || 0), 0)
+    .toFixed(2),
 );
 
 onMounted(() => {
@@ -55,10 +74,14 @@ function loadUserFromStorage() {
 }
 
 function changeView(view: View) {
+  if (view === VIEWS.MERCHANT && !guardMerchant()) return;
   ui.view = view;
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (view === VIEWS.ORDERS && isAuthed.value) {
     fetchOrders();
+  }
+  if (view === VIEWS.MERCHANT) {
+    loadMerchantShops();
   }
 }
 
@@ -71,6 +94,15 @@ function showToast(message: string) {
 function guardAuth(message = '请先登录后再继续') {
   if (!isAuthed.value) {
     changeView(VIEWS.LOGIN);
+    showToast(message);
+    return false;
+  }
+  return true;
+}
+
+function guardMerchant(message = 'Merchant access only') {
+  if (!guardAuth(message)) return false;
+  if (!isMerchant.value) {
     showToast(message);
     return false;
   }
@@ -156,6 +188,90 @@ function showProductDetail(product: any) {
 function handleImageError(e: Event) {
   const target = e.target as HTMLImageElement;
   target.src = 'https://via.placeholder.com/360?text=JD+Shop';
+}
+
+// --------- Merchant dashboard ---------
+async function loadMerchantShops() {
+  if (!guardMerchant()) return;
+  merchant.loading = true;
+  const data = await apiCall('/api/v2/shops');
+  if (data) {
+    const owned = data.filter((shop: any) => shop.OwnerID === session.user?.ID);
+    merchant.shops = owned;
+
+    if (owned.length > 0) {
+      const alreadySelected = owned.find((s: any) => s.ID === merchant.selectedShop?.ID);
+      merchant.selectedShop = alreadySelected || owned[0];
+      await loadMerchantProducts(merchant.selectedShop.ID);
+    } else {
+      merchant.selectedShop = null;
+      merchant.products = [];
+    }
+  }
+  merchant.loading = false;
+}
+
+async function loadMerchantProducts(shopId: number) {
+  if (!guardMerchant()) return;
+  merchant.loading = true;
+  const data = await apiCall(`/api/v2/shops/${shopId}/products`);
+  if (data) merchant.products = data;
+  merchant.loading = false;
+}
+
+function selectMerchantShop(shop: any) {
+  merchant.selectedShop = shop;
+  loadMerchantProducts(shop.ID);
+}
+
+async function createShop() {
+  if (!guardMerchant()) return;
+  if (!merchant.shopForm.name.trim()) {
+    showToast('请输入店铺名称');
+    return;
+  }
+  merchant.creating = true;
+  const payload = {
+    name: merchant.shopForm.name,
+    description: merchant.shopForm.description,
+    owner_id: session.user?.ID,
+  };
+  const res = await apiCall('/api/v2/shops', 'POST', payload);
+  if (res) {
+    merchant.shops.unshift(res);
+    merchant.selectedShop = res;
+    merchant.shopForm = { name: '', description: '' };
+    await loadMerchantProducts(res.ID);
+    showToast('店铺已创建');
+  }
+  merchant.creating = false;
+}
+
+async function createProduct() {
+  if (!guardMerchant()) return;
+  if (!merchant.selectedShop) {
+    showToast('请先选择店铺');
+    return;
+  }
+  if (!merchant.productForm.name || !merchant.productForm.price) {
+    showToast('商品名称与价格为必填');
+    return;
+  }
+  merchant.creating = true;
+  const payload = {
+    name: merchant.productForm.name,
+    description: merchant.productForm.description,
+    price: Number(merchant.productForm.price),
+    stock: Number(merchant.productForm.stock || 0),
+    product_img: merchant.productForm.product_img,
+  };
+  const res = await apiCall(`/api/v2/shops/${merchant.selectedShop.ID}/products`, 'POST', payload);
+  if (res) {
+    merchant.products.unshift(res);
+    merchant.productForm = { name: '', description: '', price: '', stock: 0, product_img: '' };
+    showToast('商品已上架');
+  }
+  merchant.creating = false;
 }
 
 // --------- Cart ---------
@@ -323,6 +439,13 @@ function logout() {
             <div
               class="absolute right-0 mt-2 hidden w-40 rounded-xl bg-white p-2 text-sm text-gray-700 shadow-lg ring-1 ring-gray-100 md:group-hover:block"
             >
+              <div
+                v-if="isMerchant"
+                class="cursor-pointer rounded-lg px-3 py-2 hover:bg-gray-50"
+                @click="changeView(VIEWS.MERCHANT)"
+              >
+                商家中心
+              </div>
               <div class="cursor-pointer rounded-lg px-3 py-2 hover:bg-gray-50" @click="changeView(VIEWS.ORDERS)">
                 我的订单
               </div>
@@ -574,6 +697,249 @@ function logout() {
           >
             {{ ui.submitting ? '提交中...' : '去结算' }}
           </button>
+        </div>
+      </section>
+
+      <!-- MERCHANT -->
+      <section v-if="ui.view === VIEWS.MERCHANT" class="mt-6 space-y-6">
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#0f172a] via-[#c80b1a] to-[#ff7a3d] p-6 text-white shadow-xl">
+          <div class="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.16),transparent_45%)]"></div>
+          <div class="relative flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p class="text-xs uppercase tracking-[0.3em] text-white/80">Merchant Desk</p>
+              <h2 class="mt-2 text-3xl font-extrabold leading-tight">经营面板，轻松管理店铺</h2>
+              <p class="mt-2 max-w-2xl text-sm text-white/80">店铺、商品、库存都在同一处完成，保持与消费者端一致的轻量体验。</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="rounded-xl bg-white/15 px-3 py-2 text-sm">店铺 {{ merchant.shops.length }}</div>
+              <div
+                v-if="merchant.selectedShop"
+                class="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#c80b1a] shadow-md shadow-red-200"
+              >
+                {{ merchant.selectedShop.Name }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-3">
+          <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            <div class="text-xs text-gray-500">店铺数量</div>
+            <div class="mt-2 flex items-end justify-between">
+              <span class="text-2xl font-bold text-gray-900">{{ merchant.shops.length }}</span>
+              <span class="rounded-full bg-[#f10215]/10 px-3 py-1 text-xs text-[#f10215]">Owner #{{ session.user?.ID }}</span>
+            </div>
+          </div>
+          <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            <div class="text-xs text-gray-500">商品数</div>
+            <div class="mt-2 flex items-end justify-between">
+              <span class="text-2xl font-bold text-gray-900">{{ merchant.products.length }}</span>
+              <span class="rounded-full bg-[#0ea5e9]/10 px-3 py-1 text-xs text-[#0ea5e9]">在售</span>
+            </div>
+          </div>
+          <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            <div class="text-xs text-gray-500">库存价值 (估算)</div>
+            <div class="mt-2 flex items-end justify-between">
+              <span class="text-2xl font-bold text-gray-900">￥{{ merchantCatalogValue }}</span>
+              <span class="rounded-full bg-[#16a34a]/10 px-3 py-1 text-xs text-[#15803d]">库存 {{ merchantStock }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-6 lg:grid-cols-3">
+          <div class="space-y-4 lg:col-span-2">
+            <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2">
+                  <span class="h-6 w-0.5 rounded-full bg-[#f10215]"></span>
+                  <div>
+                    <h3 class="text-lg font-bold text-gray-800">我的店铺</h3>
+                    <p class="text-xs text-gray-500">选择店铺查看商品，刷新同步最新数据</p>
+                  </div>
+                </div>
+                <button
+                  class="rounded-full border border-white/0 bg-[#f10215] px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-95 disabled:opacity-60"
+                  :disabled="merchant.loading"
+                  @click="loadMerchantShops"
+                >
+                  {{ merchant.loading ? '同步中...' : '刷新店铺' }}
+                </button>
+              </div>
+
+              <div v-if="merchant.shops.length" class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <button
+                  v-for="shop in merchant.shops"
+                  :key="shop.ID"
+                  class="group flex items-start gap-3 rounded-2xl bg-gradient-to-br from-white to-[#fff7f5] p-4 text-left shadow-sm ring-1 ring-gray-100 transition hover:-translate-y-0.5 hover:shadow-md"
+                  :class="{ 'ring-2 ring-[#f10215] shadow-lg shadow-red-100': merchant.selectedShop?.ID === shop.ID }"
+                  @click="selectMerchantShop(shop)"
+                >
+                  <div class="flex h-12 w-12 items-center justify-center rounded-full bg-white text-lg text-[#f10215] ring-1 ring-red-100 shadow-sm">
+                    <i class="fas fa-store"></i>
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="truncate text-base font-semibold text-gray-900">{{ shop.Name }}</p>
+                      <span class="rounded-full bg-gray-100 px-2 py-1 text-[10px] text-gray-600">ID #{{ shop.ID }}</span>
+                    </div>
+                    <p class="mt-1 line-clamp-2 text-xs text-gray-500">{{ shop.Description || '暂无描述' }}</p>
+                  </div>
+                </button>
+              </div>
+              <div v-else class="mt-4 rounded-xl bg-gray-50 p-6 text-center text-sm text-gray-500">
+                还没有店铺，先创建一个吧。
+              </div>
+            </div>
+
+            <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 class="text-lg font-bold text-gray-800">商品清单</h3>
+                  <p class="text-xs text-gray-500">
+                    {{ merchant.selectedShop ? `正在查看 ${merchant.selectedShop.Name}` : '请选择店铺后查看商品' }}
+                  </p>
+                </div>
+                <span class="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600">{{ merchant.products.length }} 件</span>
+              </div>
+
+              <div v-if="merchant.loading" class="flex justify-center py-10">
+                <div class="loader" />
+              </div>
+
+              <div
+                v-else-if="merchant.selectedShop && merchant.products.length"
+                class="mt-3 divide-y divide-gray-100 rounded-xl bg-white ring-1 ring-gray-50"
+              >
+                <article v-for="product in merchant.products" :key="product.ID" class="flex gap-4 p-3">
+                  <div class="h-16 w-16 overflow-hidden rounded-xl bg-gray-50 ring-1 ring-gray-100">
+                    <img
+                      :src="product.ProductImg || 'https://via.placeholder.com/120?text=Product'"
+                      class="h-full w-full object-cover"
+                      @error="handleImageError"
+                    />
+                  </div>
+                  <div class="flex flex-1 flex-col gap-1">
+                    <div class="flex items-start justify-between gap-2">
+                      <p class="text-base font-semibold text-gray-900">{{ product.Name }}</p>
+                      <span class="rounded-full bg-[#f10215]/10 px-3 py-1 text-xs font-semibold text-[#f10215]">￥{{ product.Price }}</span>
+                    </div>
+                    <p class="text-xs text-gray-500 line-clamp-2">{{ product.Description || '暂无描述' }}</p>
+                    <div class="flex items-center gap-4 text-[11px] text-gray-500">
+                      <span>库存 {{ product.Stock ?? 0 }}</span>
+                      <span>ID #{{ product.ID }}</span>
+                      <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600">Shop #{{ product.ShopID }}</span>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="mt-4 rounded-xl bg-gray-50 p-6 text-center text-sm text-gray-500">
+                {{ merchant.selectedShop ? '暂无商品，上架一件试试。' : '先选择店铺或新建店铺后再上架商品。' }}
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div class="flex items-center justify-between">
+                <h3 class="text-base font-semibold text-gray-900">新建店铺</h3>
+                <span class="text-xs text-gray-400">1 分钟开店</span>
+              </div>
+              <form class="mt-3 space-y-3" @submit.prevent="createShop">
+                <div>
+                  <label class="text-xs text-gray-500">店铺名称</label>
+                  <input
+                    v-model="merchant.shopForm.name"
+                    type="text"
+                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                    placeholder="输入店铺名"
+                  />
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500">描述</label>
+                  <textarea
+                    v-model="merchant.shopForm.description"
+                    rows="2"
+                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                    placeholder="主营品类 / 服务亮点"
+                  ></textarea>
+                </div>
+                <button
+                  type="submit"
+                  class="flex w-full items-center justify-center rounded-full bg-[#f10215] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-95 disabled:opacity-60"
+                  :disabled="merchant.creating"
+                >
+                  {{ merchant.creating ? '创建中...' : '创建店铺' }}
+                </button>
+              </form>
+            </div>
+
+            <div class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+              <div class="flex items-center justify-between">
+                <h3 class="text-base font-semibold text-gray-900">快速上架</h3>
+                <span class="text-xs text-gray-400">绑定当前店铺</span>
+              </div>
+              <form class="mt-3 space-y-3" @submit.prevent="createProduct">
+                <div class="rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  当前店铺：{{ merchant.selectedShop ? merchant.selectedShop.Name : '请选择店铺' }}
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="text-xs text-gray-500">商品名称</label>
+                    <input
+                      v-model="merchant.productForm.name"
+                      type="text"
+                      class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                      placeholder="新品标题"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-500">价格</label>
+                    <input
+                      v-model="merchant.productForm.price"
+                      type="number"
+                      step="0.01"
+                      class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                      placeholder="如 199.00"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-500">库存</label>
+                    <input
+                      v-model="merchant.productForm.stock"
+                      type="number"
+                      class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                      placeholder="100"
+                    />
+                  </div>
+                  <div>
+                    <label class="text-xs text-gray-500">封面图 URL</label>
+                    <input
+                      v-model="merchant.productForm.product_img"
+                      type="url"
+                      class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                      placeholder="https://..."
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500">卖点 / 描述</label>
+                  <textarea
+                    v-model="merchant.productForm.description"
+                    rows="2"
+                    class="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#f10215]"
+                    placeholder="一句话吸引买家"
+                  ></textarea>
+                </div>
+                <button
+                  type="submit"
+                  class="flex w-full items-center justify-center rounded-full bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                  :disabled="merchant.creating || !merchant.selectedShop"
+                >
+                  {{ merchant.creating ? '上架中...' : '发布到当前店铺' }}
+                </button>
+              </form>
+            </div>
+          </div>
         </div>
       </section>
 

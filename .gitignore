@@ -1,3 +1,5 @@
 /.vscode
 /.idea
-
+/app.yaml
+/redis-data
+/test
