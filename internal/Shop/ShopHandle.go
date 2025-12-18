@@ -253,3 +253,11 @@ func (h *ShopHandler) BatchDeleteProducts(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "products deleted"})
 }
+
+//上面是整体的更新和创建下面对于顾客行为进行划分
+
+//=========================执行商品逻辑==================
+
+type BuyProudctRequset struct {
+	ProductId uint `json:"product_id"`
+}

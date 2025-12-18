@@ -7,7 +7,10 @@ import (
 	"strconv"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/myproject/shop/pkg/middleware"
+	"gorm.io/gorm"
 )
 
 const (
@@ -16,9 +19,28 @@ const (
 	productSingleTTL = 5 * time.Minute
 )
 
+// 返回值:
+//
+//	-1: 库存 Key 不存在 (需要预热)
+//	-2: 库存不足
+//	>=0: 扣减后的剩余库存
+const luaScript = `
+local stock = redis.call("get", KEYS[1])
+if not stock then
+    return -1
+end
+stock = tonumber(stock)
+local qty = tonumber(ARGV[1])
+if stock < qty then
+	return -2
+end
+return redis.call("decrby",KEYS[1],qty)
+`
+
 type ShopService struct {
 	rep   *ShopRepository
 	cache *middleware.RedisStore
+	sf    singleflight.Group
 }
 
 func NewShopService(rep *ShopRepository, cache *middleware.RedisStore) *ShopService {
@@ -119,6 +141,8 @@ func (s *ShopService) BatchDelete(ids []uint) error {
 	return nil
 }
 
+//===================Product===================================================
+
 // Product-related methods
 func (s *ShopService) CreateProduct(shopID uint, p *Product) error {
 	if shopID == 0 {
@@ -137,26 +161,42 @@ func (s *ShopService) CreateProduct(shopID uint, p *Product) error {
 		return err
 	}
 	if s.cache != nil {
+		stockKey := fmt.Sprintf("product:stock:%d", p.ID)
+		s.cache.SetObjectWithTTL(context.Background(), stockKey, p.Stock, 0) // 0 表示永不过期
 		_ = s.cache.DelteKey(context.Background(), fmt.Sprintf("shop_products:%d:20:0", shopID))
 	}
 	return nil
 }
 
+// 添加了旁路缓存机制
 func (s *ShopService) GetProductByCode(code uint) (*Product, error) {
 	var product Product
 	cacheKey := fmt.Sprintf("product:%d", code)
+	//先查询缓存是否存在
 	if s.cache != nil {
 		if ok, err := s.cache.GetObject(context.Background(), cacheKey, &product); err == nil && ok {
 			return &product, nil
 		}
 	}
-
-	res, err := s.rep.GetProductByCode(code)
-	if err != nil || s.cache == nil {
-		return res, err
+	//如果不存在，合并请求流为数据库减压（slow_path）
+	result, err, _ := s.sf.Do(cacheKey, func() (any, error) {
+		//查询一次数据库
+		res, err := s.rep.GetProductByCode(code)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				s.cache.SetObjectWithTTL(context.Background(), cacheKey, "{}", 5*time.Minute)
+				return nil, err
+			}
+			return nil, err
+		}
+		// 4. 写入缓存 (Cache-Aside)
+		s.cache.SetObjectWithTTL(context.Background(), cacheKey, res, 1*time.Hour)
+		return res, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	_ = s.cache.SetObjectWithTTL(context.Background(), cacheKey, res, productSingleTTL)
-	return res, nil
+	return result.(*Product), err
 }
 
 func (s *ShopService) GetProductByName(shopID uint, name string) (*Product, error) {
@@ -201,9 +241,13 @@ func (s *ShopService) UpdateProduct(p *Product) error {
 	}
 	if s.cache != nil {
 		_ = s.cache.SetObjectWithTTL(context.Background(), fmt.Sprintf("product:%d", p.ID), p, productSingleTTL)
+		//清除失效缓存
 		if p.ShopID != 0 {
 			_ = s.cache.DelteKey(context.Background(), fmt.Sprintf("shop_products:%d:20:0", p.ShopID))
 		}
+
+		stockKey := fmt.Sprintf("product:stock:%d", p.ID)
+		s.cache.Client.Set(context.Background(), stockKey, p.Stock, 0)
 	}
 	return nil
 }
@@ -234,6 +278,44 @@ func (s *ShopService) BatchDeleteProducts(ids []uint) error {
 		for _, id := range ids {
 			_ = s.cache.DelteKey(context.Background(), fmt.Sprintf("product:%d", id))
 		}
+	}
+	return nil
+}
+
+func (s *ShopService) DecreaseStock(productid uint, quantity int) error {
+	//构架cache key
+	cachekey := fmt.Sprintf("product:stock:%d", productid)
+	if s.cache != nil {
+		//第一次防护先将库存减在redis里面
+		// keys: [cacheKey], args: [quantity]
+		res, err := s.cache.Client.Eval(context.Background(), luaScript, []string{cachekey}, quantity).Result()
+		if err != nil {
+			fmt.Printf("Redis error: %v, falling back to DB\n", err)
+		} else {
+			retVal := res.(int64)
+			switch retVal {
+			case -1:
+				//Key 不存在：说明缓存过期或者没有进行数据预热
+			case -2:
+				return errors.New("insufficient stock (redis)")
+			default:
+				//获取扣除数据库的资格
+			}
+		}
+	}
+
+	//数据库阶段
+	err := s.rep.DecreaseStock(productid, quantity)
+	if err != nil {
+		//4.数据库扣除失败必须将缓存中扣除的库存返还回去
+		if s.cache != nil {
+			s.cache.Client.IncrBy(context.Background(), cachekey, int64(quantity))
+		}
+		return fmt.Errorf("decrease stock failed: %w", err)
+	}
+	// 扣减成功，可以清理商品详情缓存，保证数据新鲜度
+	if s.cache != nil {
+		_ = s.cache.DelteKey(context.Background(), fmt.Sprintf("product:%d", productid))
 	}
 	return nil
 }

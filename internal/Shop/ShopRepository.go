@@ -129,3 +129,26 @@ func (r *ShopRepository) BatchDeleteProducts(ids []uint) error {
 	}
 	return r.Database.DB.Delete(&Product{}, ids).Error
 }
+
+// 数据库层面的乐观锁扣减
+func (r *ShopRepository) DecreaseStock(id uint, quannity int) error {
+	if quannity <= 0 {
+		return errors.New("quantity must be greater than 0")
+	}
+	result := r.Database.DB.Model(&Product{}).
+		Where("id = ? AND stock >= ?", id, quannity).
+		Update("stock", gorm.Expr("stock - ?", quannity))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("insufficient stock")
+	}
+	return nil
+}
+
+// 回滚库存
+func (r *ShopRepository) AddStock(id uint, quannity int) error {
+	return r.Database.DB.Model(&Product{}).Where("id = ?", id).Update("stock", gorm.Expr("stock + ?", quannity)).Error
+
+}
