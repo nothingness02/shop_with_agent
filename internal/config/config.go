@@ -58,26 +58,40 @@ func LoadConfig(path string) (config *Config, err error) {
 		}
 	}
 	err = v.Unmarshal(&config)
+	log.Printf("DB User: %s, DB Password length: %d", config.Database.User, len(config.Database.Password))
 	return
 }
+
 func (c *DatabaseConfig) BuildPostgresDSN(sslmode string) string {
-	hostPort := c.Host
-	if c.Port != "" {
-		hostPort += ":" + c.Port
+	// 默认 host 和 port
+	host := c.Host
+	if host == "" {
+		host = "localhost"
 	}
+
+	port := c.Port
+	if port == "" {
+		port = "5432" // PostgreSQL 默认端口
+	}
+
+	// 构建 host:port
+	hostPort := host + ":" + port
+
+	// 构建用户信息（必须提供 password，即使为空）
+	userInfo := url.UserPassword(c.User, c.Password)
 
 	u := url.URL{
 		Scheme: "postgres",
-		User:   url.UserPassword(c.User, c.Password),
+		User:   userInfo,
 		Host:   hostPort,
 		Path:   "/" + c.DatabaseName,
 	}
-
-	if sslmode != "" {
-		q := u.Query()
-		q.Set("sslmode", sslmode)
-		u.RawQuery = q.Encode()
+	q := u.Query()
+	if sslmode == "" {
+		sslmode = "disable"
 	}
+	q.Set("sslmode", sslmode)
+	u.RawQuery = q.Encode()
 
 	return u.String()
 }

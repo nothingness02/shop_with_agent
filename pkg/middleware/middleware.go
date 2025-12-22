@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	user "github.com/myproject/shop/internal/User"
+	"github.com/myproject/shop/pkg/logger"
 	"github.com/myproject/shop/pkg/utils"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -36,6 +38,11 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
 		if auth == "" {
+			logger.Warn("missing_authorization_header", map[string]interface{}{
+				"method":  c.Request.Method,
+				"path":    c.Request.URL.Path,
+				"headers": c.Request.Header,
+			})
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is missing"})
 			return
 		}
@@ -77,8 +84,61 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		}
 
 		jti, _ := claims["jti"].(string)
-		sub, _ := claims["sub"].(string)
-		roleFloat, _ := claims["role"].(float64)
+		var userID uint
+		var userIDOK bool
+		switch v := claims["sub"].(type) {
+		case float64:
+			userID = uint(v)
+			userIDOK = true
+		case int64:
+			userID = uint(v)
+			userIDOK = true
+		case int:
+			userID = uint(v)
+			userIDOK = true
+		case uint:
+			userID = v
+			userIDOK = true
+		case string:
+			if parsed, err := strconv.ParseUint(v, 10, 64); err == nil {
+				userID = uint(parsed)
+				userIDOK = true
+			}
+		case json.Number:
+			if parsed, err := v.Int64(); err == nil {
+				userID = uint(parsed)
+				userIDOK = true
+			}
+		}
+		if !userIDOK {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid sub claim in token"})
+			return
+		}
+		var role uint
+		var roleOK bool
+		switch v := claims["role"].(type) {
+		case float64:
+			role = uint(v)
+			roleOK = true
+		case int64:
+			role = uint(v)
+			roleOK = true
+		case int:
+			role = uint(v)
+			roleOK = true
+		case uint:
+			role = v
+			roleOK = true
+		case json.Number:
+			if parsed, err := v.Int64(); err == nil {
+				role = uint(parsed)
+				roleOK = true
+			}
+		}
+		if !roleOK {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid role claim in token"})
+			return
+		}
 		// 检查黑名单
 		if RedisClient != nil {
 			ctx := context.Background()
@@ -88,8 +148,8 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		c.Set(CtxUserIDKey, sub)
-		c.Set(CtxUserRoleKey, uint(roleFloat))
+		c.Set(CtxUserIDKey, userID)
+		c.Set(CtxUserRoleKey, role)
 		c.Set(CtxTokenJTIKey, jti)
 		c.Next()
 	}

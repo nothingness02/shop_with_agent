@@ -15,4 +15,5 @@ type User struct {
 	Password string `gorm:"size:255;not null"`        // 密码（哈希值）
 	Role     uint   `gorm:"not null"`                 // 角色（admin, customer）
 	UserImg  string `gorm:"size:500"`                 // 用户头像URL
+	Phone    string `gorm:"size:30"`                  //用户的电话
 }

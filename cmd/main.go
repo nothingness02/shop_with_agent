@@ -3,21 +3,27 @@ package main
 import (
 	"log"
 
+	"github.com/myproject/shop/cmd/validator"
 	config "github.com/myproject/shop/internal/config"
+	"github.com/myproject/shop/pkg/logger"
 	"github.com/myproject/shop/pkg/middleware"
 )
 
 func main() {
-	// 1. 加载配置
 	cfg, err := config.LoadConfig(".")
 	if err != nil {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// 2. 初始化 JWT Secret (从配置中读取)
-	middleware.InitJWT(cfg.JWT.Secret)
+	if err := logger.Init("logs/app.jsonl"); err != nil {
+		log.Fatalf("cannot init logger: %v", err)
+	}
+	defer func() {
+		_ = logger.Close()
+	}()
 
-	// 3. 依赖注入初始化应用 (调用 wire_gen.go 中的函数)
+	middleware.InitJWT(cfg.JWT.Secret)
+	validator.RegisterPhoneValidator()
 	app, err := InitializeApp(cfg)
 	if err != nil {
 		log.Fatalf("cannot initialize app: %v", err)

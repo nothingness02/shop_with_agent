@@ -6,12 +6,15 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	auth "github.com/myproject/shop/internal/Auth"
+	cart "github.com/myproject/shop/internal/Cart"
 	comment "github.com/myproject/shop/internal/Comment"
+	Coordinator "github.com/myproject/shop/internal/Coordinator"
 	"github.com/myproject/shop/internal/Order"
 	shop "github.com/myproject/shop/internal/Shop"
 	user "github.com/myproject/shop/internal/User"
 	config "github.com/myproject/shop/internal/config"
 	search "github.com/myproject/shop/internal/search"
+	"github.com/myproject/shop/pkg/logger"
 	"github.com/myproject/shop/pkg/middleware"
 )
 
@@ -26,12 +29,16 @@ func NewApplication(cfg *config.Config,
 	orderH *Order.OrderHandler,
 	shopH *shop.ShopHandler,
 	searchH *search.Handler,
-	commentH *comment.CommentHandler) *Application {
+	commentH *comment.CommentHandler,
+	cartH *cart.CartHandler,
+	coordinatorH *Coordinator.TradeHandler) *Application {
 	gin.SetMode(cfg.Server.Mode)
 	app := &Application{
-		Engine: gin.Default(),
+		Engine: gin.New(),
 		config: cfg,
 	}
+	app.Use(gin.Recovery())
+	app.Use(logger.GinLogger())
 	app.Use(cors.New(cors.Config{
 		AllowAllOrigins:  true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
@@ -59,10 +66,17 @@ func NewApplication(cfg *config.Config,
 	v1.Use(middleware.JWTAuthMiddleware())
 	{
 		v1.GET("/orders", orderH.ListOrders)
-		v1.GET("/orders/:id", orderH.GetOrder)
+		v1.GET("/orders/:id", coordinatorH.CreateOrder)
 		v1.POST("/orders", orderH.CreateOrder)
 		v1.PATCH("/orders/:id/status", orderH.UpdateOrderStatus)
 		v1.DELETE("/orders/:id", orderH.DeleteOrder)
+
+		// Cart routes
+		v1.GET("/cart", cartH.List)
+		v1.POST("/cart/items", cartH.Add)
+		v1.PATCH("/cart/items/:id", cartH.Update)
+		v1.DELETE("/cart/items/:id", cartH.Delete)
+		v1.DELETE("/cart", cartH.Clear)
 	}
 
 	v2 := app.Group("/api/v2")

@@ -282,7 +282,7 @@ func (s *ShopService) BatchDeleteProducts(ids []uint) error {
 	return nil
 }
 
-func (s *ShopService) DecreaseStock(productid uint, quantity int) error {
+func (s *ShopService) DecreaseStockWithTx(ctx context.Context, tx *gorm.DB, productid uint, quantity int) error {
 	//构架cache key
 	cachekey := fmt.Sprintf("product:stock:%d", productid)
 	if s.cache != nil {
@@ -305,7 +305,7 @@ func (s *ShopService) DecreaseStock(productid uint, quantity int) error {
 	}
 
 	//数据库阶段
-	err := s.rep.DecreaseStock(productid, quantity)
+	err := s.rep.DecreaseStockWithTx(ctx, tx, productid, quantity)
 	if err != nil {
 		//4.数据库扣除失败必须将缓存中扣除的库存返还回去
 		if s.cache != nil {

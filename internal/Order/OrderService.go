@@ -1,7 +1,10 @@
 package Order
 
 import (
+	"context"
 	"errors"
+
+	"gorm.io/gorm"
 )
 
 type OrderService struct {
@@ -20,6 +23,7 @@ func (s *OrderService) List(limit, offset int) ([]Order, error) {
 func (s *OrderService) GetOrderById(id uint) (*Order, error) {
 	return s.rep.Get(id)
 }
+
 func (s *OrderService) CreateOrder(o *Order) error {
 	if o == nil || len(o.OrderItems) == 0 {
 
@@ -27,6 +31,14 @@ func (s *OrderService) CreateOrder(o *Order) error {
 	}
 	return s.rep.Create(o)
 
+}
+
+func (s *OrderService) CreateOrderWithTx(ctx context.Context, tx *gorm.DB, o *Order) error {
+	if o == nil || len(o.OrderItems) == 0 {
+
+		return errors.New("order items is empty")
+	}
+	return s.rep.CreateWithTx(ctx, tx, o)
 }
 
 func (s *OrderService) UpdateStatus(id uint, status OrderStatus) error {

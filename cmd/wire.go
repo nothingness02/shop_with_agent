@@ -8,16 +8,17 @@ import (
 
 	"github.com/google/wire"
 	auth "github.com/myproject/shop/internal/Auth"
+	cart "github.com/myproject/shop/internal/Cart"
 	comment "github.com/myproject/shop/internal/Comment"
+	"github.com/myproject/shop/internal/Coordinator"
 	"github.com/myproject/shop/internal/Order"
-	"gorm.io/gorm"
-
 	shop "github.com/myproject/shop/internal/Shop"
 	user "github.com/myproject/shop/internal/User"
 	config "github.com/myproject/shop/internal/config"
 	"github.com/myproject/shop/internal/search"
 	"github.com/myproject/shop/pkg/database"
 	"github.com/myproject/shop/pkg/middleware"
+	"gorm.io/gorm"
 )
 
 func provideRedisStore(cfg *config.Config) *middleware.RedisStore {
@@ -31,7 +32,7 @@ func provideRedisStore(cfg *config.Config) *middleware.RedisStore {
 }
 
 func provideDB(cfg *config.Config) (*database.Database, error) {
-	db, err := database.NewDB(cfg.Database.BuildPostgresDSN(""))
+	db, err := database.NewDB(cfg.Database.BuildPostgresDSN("disable"))
 	if err != nil {
 		log.Fatal(err)
 		return db, err
@@ -39,6 +40,7 @@ func provideDB(cfg *config.Config) (*database.Database, error) {
 	if err := db.AutoMigrate(&Order.Order{}, &Order.OrderItem{},
 		&shop.Shop{}, &shop.Product{},
 		&shop.Category{}, &user.User{}, &comment.Comment{},
+		&cart.CartItem{},
 	); err != nil {
 		log.Fatal(err)
 		return db, err
@@ -60,10 +62,13 @@ func InitializeApp(cfg *config.Config) (*Application, error) {
 		provideGormDB,
 		user.ProviderSet,
 		auth.ProviderSet,
+		cart.ProviderSet,
 		Order.ProviderSet,
 		shop.ProviderSet,
 		search.ProviderSet,
 		comment.ProviderSet,
+		Coordinator.NewCheckoutService,
+		Coordinator.NewTradeHandler,
 		NewApplication,
 	)
 	return &Application{}, nil

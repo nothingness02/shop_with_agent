@@ -1,6 +1,7 @@
 package shop
 
 import (
+	"context"
 	"errors"
 
 	"github.com/myproject/shop/pkg/database"
@@ -131,11 +132,15 @@ func (r *ShopRepository) BatchDeleteProducts(ids []uint) error {
 }
 
 // 数据库层面的乐观锁扣减
-func (r *ShopRepository) DecreaseStock(id uint, quannity int) error {
+func (r *ShopRepository) DecreaseStockWithTx(ctx context.Context, tx *gorm.DB, id uint, quannity int) error {
 	if quannity <= 0 {
 		return errors.New("quantity must be greater than 0")
 	}
-	result := r.Database.DB.Model(&Product{}).
+	db := r.Database.DB
+	if tx != nil {
+		db = tx
+	}
+	result := db.Model(&Product{}).
 		Where("id = ? AND stock >= ?", id, quannity).
 		Update("stock", gorm.Expr("stock - ?", quannity))
 	if result.Error != nil {

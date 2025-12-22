@@ -1,6 +1,7 @@
 package Order
 
 import (
+	"context"
 	"errors"
 
 	"github.com/myproject/shop/pkg/database"
@@ -17,7 +18,7 @@ func NewRepository(db *database.Database) *OrderRepository {
 
 func (r *OrderRepository) List(limit, offset int) ([]Order, error) {
 	var orders []Order
-	if err := r.Database.DB.Preload("Items").Limit(limit).Offset(offset).Find(&orders).Error; err != nil {
+	if err := r.Database.DB.Preload("OrderItems").Limit(limit).Offset(offset).Find(&orders).Error; err != nil {
 		return nil, err
 	}
 	return orders, nil
@@ -25,7 +26,7 @@ func (r *OrderRepository) List(limit, offset int) ([]Order, error) {
 
 func (r *OrderRepository) Get(id uint) (*Order, error) {
 	var o Order
-	if err := r.Database.DB.Preload("Items").First(&o, id).Error; err != nil {
+	if err := r.Database.DB.Preload("OrderItems").First(&o, id).Error; err != nil {
 		return nil, err
 	}
 	return &o, nil
@@ -47,6 +48,27 @@ func (r *OrderRepository) Create(o *Order) error {
 		return nil
 	})
 }
+
+// 用于组合事务的专用函数
+func (r *OrderRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, o *Order) error {
+	db := r.Database.DB
+	if tx != nil {
+		db = tx
+	}
+	if err := db.Create(o).Error; err != nil {
+		return err
+	}
+	for i := range o.OrderItems {
+		o.OrderItems[i].OrderID = o.ID
+	}
+	if len(o.OrderItems) > 0 {
+		if err := db.Create(o.OrderItems).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *OrderRepository) UpdateStatus(id uint, status OrderStatus) error {
 	return r.Database.DB.Model(&Order{}).Where("id = ?", id).Update("status", status).Error
 }

@@ -8,7 +8,9 @@ package main
 
 import (
 	"github.com/myproject/shop/internal/Auth"
+	"github.com/myproject/shop/internal/Cart"
 	"github.com/myproject/shop/internal/Comment"
+	"github.com/myproject/shop/internal/Coordinator"
 	"github.com/myproject/shop/internal/Order"
 	"github.com/myproject/shop/internal/Shop"
 	"github.com/myproject/shop/internal/User"
@@ -49,7 +51,12 @@ func InitializeApp(cfg *cpnfig.Config) (*Application, error) {
 	commentRepository := comment.NewRepository(database)
 	commentService := comment.NewCommentService(commentRepository)
 	commentHandler := comment.NewCommentHandler(commentService)
-	application := NewApplication(cfg, userHandle, authHandler, orderHandler, shopHandler, handler, commentHandler)
+	cartRepository := cart.NewCartRepository(database)
+	cartService := cart.NewCartService(cartRepository)
+	cartHandler := cart.NewCartHandler(cartService)
+	checkoutService := Coordinator.NewCheckoutService(db, orderService, shopService)
+	tradeHandler := Coordinator.NewTradeHandler(checkoutService)
+	application := NewApplication(cfg, userHandle, authHandler, orderHandler, shopHandler, handler, commentHandler, cartHandler, tradeHandler)
 	return application, nil
 }
 
@@ -66,7 +73,7 @@ func provideRedisStore(cfg *cpnfig.Config) *middleware.RedisStore {
 }
 
 func provideDB(cfg *cpnfig.Config) (*database.Database, error) {
-	db, err := database.NewDB(cfg.Database.BuildPostgresDSN(""))
+	db, err := database.NewDB(cfg.Database.BuildPostgresDSN("disable"))
 	if err != nil {
 		log.Fatal(err)
 		return db, err
@@ -74,6 +81,7 @@ func provideDB(cfg *cpnfig.Config) (*database.Database, error) {
 	if err := db.AutoMigrate(&Order.Order{}, &Order.OrderItem{},
 		&shop.Shop{}, &shop.Product{},
 		&shop.Category{}, &user.User{}, &comment.Comment{},
+		&cart.CartItem{},
 	); err != nil {
 		log.Fatal(err)
 		return db, err

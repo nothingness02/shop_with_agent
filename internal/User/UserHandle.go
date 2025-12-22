@@ -24,6 +24,7 @@ type UpdateUserRequest struct {
 	Email    string `json:"email" binding:"omitempty,email"`
 	Password string `json:"password" binding:"omitempty,min=6"`
 	UserImg  string `json:"user_img" binding:"omitempty,url"`
+	Phone    string `json:"phonenums" binding:"omitempty,phone"`
 }
 
 func NewUserHandle(service *UserService) *UserHandle {
@@ -100,6 +101,9 @@ func (h *UserHandle) UpdateUser(c *gin.Context) {
 	}
 	if req.UserImg != "" {
 		user.UserImg = req.UserImg
+	}
+	if req.Phone != "" {
+		user.Phone = req.Phone
 	}
 	if err := h.servive.Repo.UpdateUser(user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
